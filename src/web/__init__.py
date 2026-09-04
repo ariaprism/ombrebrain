@@ -34,6 +34,7 @@ from . import onboarding
 from . import v3_debug
 from . import them
 from . import you
+from . import feature_settings
 
 
 _WEB_MODULES = (
@@ -57,6 +58,7 @@ _WEB_MODULES = (
     ("web.v3_debug", v3_debug.register),
     ("web.them", them.register),
     ("web.you", you.register),
+    ("web.feature_settings", feature_settings.register),
 )
 
 

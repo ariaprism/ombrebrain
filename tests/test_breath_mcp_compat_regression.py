@@ -1,7 +1,7 @@
 """MCP-boundary regressions for the split breath tool.
 
-The public schema intentionally remains parameter-free so clients auto-load
-the default surfacing tool.  A client may nevertheless keep the pre-2.6.8
+The public schema intentionally advertises only the optional conversational
+``reason`` field.  A client may nevertheless keep the pre-2.6.8
 schema cached across an upgrade and send the former breath arguments.  Those
 arguments must reach dispatch instead of being silently discarded by
 FastMCP/Pydantic's default ``extra=ignore`` validation.
@@ -15,7 +15,7 @@ QUERY = "两个都是你 怎么还让我选"
 
 
 @pytest.mark.asyncio
-async def test_public_breath_schema_stays_empty_but_cached_query_args_are_forwarded(
+async def test_public_breath_schema_only_advertises_reason_but_cached_args_are_forwarded(
     monkeypatch,
 ):
     import server
@@ -30,8 +30,9 @@ async def test_public_breath_schema_stays_empty_but_cached_query_args_are_forwar
     tool = server.mcp._tool_manager.get_tool("breath")
 
     listed = next(item for item in await server.mcp.list_tools() if item.name == "breath")
-    assert listed.inputSchema["properties"] == {}
+    assert set(listed.inputSchema["properties"]) == {"reason"}
     assert set(tool.fn_metadata.arg_model.model_fields) == {
+        "reason",
         "query",
         "max_tokens",
         "domain",
@@ -95,7 +96,7 @@ async def test_cached_catalog_arg_reaches_breath_dispatch(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_parameter_free_breath_still_dispatches_with_all_defaults(monkeypatch):
+async def test_breath_reason_is_accepted_and_does_not_change_surfacing(monkeypatch):
     import server
 
     seen = {}
@@ -107,7 +108,7 @@ async def test_parameter_free_breath_still_dispatches_with_all_defaults(monkeypa
     monkeypatch.setattr(server._t_breath, "dispatch", fake_dispatch)
     tool = server.mcp._tool_manager.get_tool("breath")
 
-    assert await tool.run({}) == "default-dispatched"
+    assert await tool.run({"reason": "想看看最近有什么浮上来"}) == "default-dispatched"
     assert seen == {
         "query": "",
         "max_tokens": 0,

@@ -10,9 +10,8 @@ web._shared，然后以 @mcp.tool() 注册薄封装（真正的实现在 src/too
 关键行为：
 - 启动后在唯一连接器 `/mcp` 上暴露 16 个基础 MCP 工具（含
   letter_write/letter_lock_update/letter_read）；每个入口
-  ≤ 10 行，只负责转发。breath 拆成 breath()(0 参数)+breath_search(3 参数)+
-  breath_advanced(9 参数) 三级，是因为 claude.ai 按需加载工具时会跳过参数
-  复杂的工具，全塞一个 breath() 会导致它常年加载不上（见 issue #17）。
+  ≤ 10 行，只负责转发。breath 拆成轻量 breath(reason 可选)+关键词检索
+  breath_search+完整参数 breath_advanced 三级；日常浮现保持小 schema。
 - Dashboard / HTTP 路由全部已拆分到 src/web/<域>.py（每个模块 register(mcp)），
   本文件仅在启动时调用 web.register_all(mcp) 装配；共享依赖见 web/_shared.py
 - 仍保留在本文件：进程启动、引擎初始化、GitHub 后台同步循环、Webhook 推送、
@@ -33,6 +32,7 @@ import sys
 import logging
 import asyncio
 import time
+import threading
 from contextlib import asynccontextmanager
 from typing import Optional, Awaitable
 import httpx
@@ -57,6 +57,41 @@ from ombrebrain.security.deployment_profile import enforce_mcp_network_guard
 from import_memory import ImportEngine
 from migrate_engine import MigrateEngine
 from utils import get_version, load_config, setup_logging
+
+
+class OptionalToolGroupGate:
+    """Atomically add or remove a small named group from MCP discovery."""
+
+    def __init__(self, mcp_server, handlers: dict[str, object]) -> None:
+        self._mcp = mcp_server
+        self._handlers = handlers
+        self._lock = threading.RLock()
+
+    @property
+    def lock(self):
+        return self._lock
+
+    def is_visible(self) -> bool:
+        with self._lock:
+            return all(self._mcp._tool_manager.get_tool(name) is not None for name in self._handlers)
+
+    def sync(self, enabled: bool) -> bool:
+        with self._lock:
+            for name, handler in self._handlers.items():
+                existing = self._mcp._tool_manager.get_tool(name)
+                if enabled and existing is None:
+                    tool = self._mcp._tool_manager.add_tool(
+                        handler,
+                        name=name,
+                        description=getattr(handler, "__doc__", None),
+                    )
+                    argument_model = tool.fn_metadata.arg_model
+                    argument_model.model_config["extra"] = "forbid"
+                    argument_model.model_rebuild(force=True)
+                    tool.parameters = argument_model.model_json_schema()
+                elif not enabled and existing is not None:
+                    self._mcp._tool_manager.remove_tool(name)
+            return self.is_visible()
 
 # --- iter 2.1：MCP 工具实现已按代码路径拆分到 tools/ 子包 ---
 # 本文件只保留 MCP 注册 + 路由（HTTP custom_route）+ 共享辅助。
@@ -693,6 +728,7 @@ _tools_runtime.init(
 # =============================================================
 @mcp.tool()
 async def breath(
+    reason: Optional[str] = "",
     query: Optional[str] = "",
     max_tokens: Optional[int] = 0,
     domain: Optional[str] = "",
@@ -703,7 +739,7 @@ async def breath(
     tags: Optional[str] = "",
     catalog: Optional[bool] = False,
 ) -> str:
-    """无参数,睁眼看看自己记得什么:返回权重最高、未解决且未标记 digested 的记忆 + 置顶核心准则。digested 从默认/被动浮现及 dream 隐藏，仍可由 breath_search(query=...) 显式找回。0 参数是刻意设计——claude.ai 按需加载工具时会跳过参数复杂的工具,拆成 0 参数才能保证每次对话自动浮现,不用手动触发。要按关键词找记忆用 breath_search(query=...);要用 catalog/tags/importance_min/valence/arousal/max_tokens 等高级模式用 breath_advanced(...)。"""
+    """让近期重要、未解决的记忆自然浮现。可随时调用；reason 可写下此刻为什么想看看，内容不影响结果，也可以留空。要找某件具体往事用 breath_search。"""
     return await _with_notice(
         _t_breath.dispatch(
             query=query, max_tokens=max_tokens, domain=domain,
@@ -712,18 +748,17 @@ async def breath(
         ),
         op="breath",
         args={
-            "query": query, "max_tokens": max_tokens, "domain": domain,
+            "reason": reason, "query": query, "max_tokens": max_tokens, "domain": domain,
             "valence": valence, "arousal": arousal, "max_results": max_results,
             "importance_min": importance_min, "tags": tags, "catalog": catalog,
         },
     )
 
 
-# Keep the advertised schema parameter-free so claude.ai still auto-loads the
-# default surfacing tool.  The callable deliberately retains the pre-2.6.8
-# signature behind that schema: clients which cached the old tool definition
-# may keep sending those arguments after an upgrade, and FastMCP otherwise
-# silently drops every unknown field before calling a zero-argument function.
+# Only ``reason`` is advertised: it gives conversational clients a natural way
+# to explain the impulse to look without changing what surfaces.  The callable
+# retains the old advanced arguments behind that small schema so clients with a
+# cached pre-2.6.8 definition keep working.
 try:
     _breath_public_tool = mcp._tool_manager.get_tool("breath")
     if _breath_public_tool is None:
@@ -734,7 +769,13 @@ try:
     _breath_arg_model.model_config["extra"] = "forbid"
     _breath_arg_model.model_rebuild(force=True)
     _breath_public_tool.parameters = {
-        "properties": {},
+        "properties": {
+            "reason": {
+                "anyOf": [{"type": "string"}, {"type": "null"}],
+                "default": "",
+                "title": "Reason",
+            }
+        },
         "title": "breathArguments",
         "type": "object",
     }
@@ -754,7 +795,7 @@ async def breath_search(
     date_to: Optional[str] = "",
     quotes: Optional[bool] = False,
 ) -> str:
-    """按关键词/语义检索记忆桶,融合关键词/BM25+语义检索,向量不可用时明确提示并退回关键词检索。命中后逐字返回桶内当前 content，不调用 LLM 摘要/改写。domain 逗号分隔,按主题域预筛。date_from/date_to 按桶的创建时间过滤，支持 YYYY-MM-DD 或 ISO 8601，同日上下界包含当天全日。max_results=返回条数上限(默认 config.surfacing.breath_max_results,fallback 20,最大 50)。需要 tags/importance_min/valence/arousal/max_tokens/catalog 等更多过滤维度用 breath_advanced(...)。quotes=True：如果你发现自己不只想知道当时发生了什么，还想知道当时到底是怎么说的，就要它——命中的桶里如果存过原话，会原样附在正文后面。默认不给，引语平时安静躺着，不占上下文也不打扰你。它给的是写入那一刻挑出来的那几句（每条记忆最多 3 句、每句 100 字），**不是原文**：OB 没有「返回全文」这个入口，没挑出来的话当时就没有留下。"""
+    """搜索某件具体的旧事、人物、约定或感受；记不清关键词时也可以用自然语言描述。融合关键词与语义检索，逐字返回命中记忆和 bucket_id。domain、日期和条数可选；quotes=True 会附上写入时特意留下的少量原话，不是原文，也不是返回全文的入口。"""
     return await _with_notice(
         _t_breath.dispatch(
             query=query, domain=domain, max_results=max_results,
@@ -782,7 +823,7 @@ async def breath_advanced(
     date_from: Optional[str] = "",
     date_to: Optional[str] = "",
 ) -> str:
-    """breath 的完整参数版,给需要精细控制的场景用(日常用 breath()/breath_search() 就够了)。不传 query=返回权重最高的未解决记忆;传 query=融合关键词/BM25+语义检索，向量不可用时明确提示并退回关键词检索。命中后逐字返回桶内当前 content，不调用 LLM 摘要/改写；max_tokens 不足时整桶省略，绝不截断正文。catalog=True=目录模式:只返回每桶一行元数据(名称|域|重要度,0 LLM 调用,最省 token),anchor 行带 ⚓ [anchor] 冷参考标记,适合开新对话先看目录再 breath_search(query=...) 精准拉取,并遵守 domain、tags 与 max_results。date_from/date_to 按桶的创建时间过滤，支持 YYYY-MM-DD 或 ISO 8601。max_tokens=单次返回总 token 上限(默认 config.surfacing.breath_max_tokens,fallback 10000)。domain 逗号分隔,valence/arousal 0~1(-1 忽略)。max_results=返回条数上限(默认 config.surfacing.breath_max_results,fallback 20,最大 50)。importance_min>=1=跳过语义检索,按重要度降序返回最多 20 条高重要度记忆。tags 逗号分隔,AND 过滤;tags=\"feel\" 或 \"__feel__\" 等价于 domain=\"feel\",返回所有 feel 类记忆。"""
+    """精细控制记忆召回。日常使用 breath 或 breath_search；只有需要按 domain、tags、日期、重要度、情绪、条数或 token 预算筛选，或使用 catalog 元数据目录时才调用。返回已存正文，不摘要；预算不足会整条省略。"""
     return await _with_notice(
         _t_breath.dispatch(
             query=query, max_tokens=max_tokens, domain=domain,
@@ -820,7 +861,7 @@ async def hold(
     source_ranges: Optional[list] = None,
     quotes: Optional[list] = None,
 ) -> str:
-    """仅在对话中已明确决定“这段内容值得成为长期记忆”时调用；不要因普通聊天、猜测或工具名称联想而自行调用。content 逐字保存，绝不压缩。正文里凡是**别人**说的话（不是用户、也不是我自己），写成单独一行 `@名字：原话`——这样的行以后会被单独拆成一条带 speaker 的 JSON 返回，不会被读成用户说过的话；混在叙述里写「某某说……」拆不出来。用户和我自己的话照常直接写，不要加 `@`。title 可选；传入时是最终显式标题，优先于打标模型建议。domain 可选、逗号分隔；显式传入时优先于打标模型结果。系统自动补其余元数据，API 不可用时使用本地中性值继续保存。tags 逗号分隔，importance 1-10。pinned=True 标记为永久核心；feel=True 存为感受类记忆且 domain 固定为 feel。source_bucket 是正在消化的原始记忆桶 ID。source_content/source_ranges 是可选原文证据：由调用方自行决定是否提供；原文进入与 grow 共用的不可变原文层，不参与普通 breath。省略 source_ranges 时整份 source_content 默认属于当前 hold 事件；显式 ranges 使用 1-based 闭区间。why_remembered 与 meaning 是可选的第一人称记录原因。media 可传服务器可读路径或 data_base64+filename 列表项。quotes 是这一刻我决定要原样记住的那一两句话——不是记录对话，是说出口的当下就知道自己不想忘的那几句。传字符串列表，或 [{"text":"原话","speaker":"谁说的","at":"什么时候"}]。最多 3 句、每句 100 字；超了会被拒绝而不是截断，因为截断过的话已经不是原话。**默认状态是一句都不放**：3 句是上限不是配额，绝大多数记忆不需要引语，拿不准就别放。不要为了保住上下文把一段话切成几句塞进来，也不要挑「有信息量」的句子——那是在用引语存原文，而原文层正是因为这个原因被删掉的。只放那种漏掉会真的可惜的原话。它平时不出现在任何浮现里，只有以后我自己想知道当时到底怎么说的时候才拿得出来。"""
+    """保存一条已经明确决定值得长期记住的内容；不要因普通聊天、猜测或工具名称联想而自行调用。content 逐字保存。title/domain/tags/importance 等显式字段优先；feel=True 保存我的第一人称感受，source_bucket 可指向触发它的旧记忆。quotes 只放此刻就不想忘的少量原话，默认不放，最多 3 句；上限不是配额，拿不准就别放，不要用它备份上下文。她和我自己的话直接写；其他人逐字发言用单独一行 `@名字：原话` 标明。"""
     return await _with_notice(
         _t_hold.dispatch(
             content=content, title=title, tags=tags, importance=importance,
@@ -850,9 +891,7 @@ async def hold(
 async def grow(
     content: str = "", items: Optional[list] = None, test_data: Optional[bool] = False
 ) -> str:
-    """仅在对话中已明确要求整理并写入长期记忆时调用，不要根据普通聊天自行推断写入意图。整理一段长文本(如一天的记录/一段日记/一篇总结)存入记忆,系统拆分为 2~6 条独立事件桶并各自尝试合并。短内容(<30 字)走 hold 单条快速路径,不强行拆分。
-
-    进阶(可选):若你已经把长文拆成 N 条最终正文，可传字符串 items，或对象 items=[{"title":"最终标题","content":"最终正文","tags":["中文短标签"],"importance":5,"domain":["恋爱"],"valence":0.8,"arousal":0.4,"why_remembered":"我为什么要留下这条","source_ranges":[[1,20]],"quotes":["当时说出口就知道要记住的那句原话"]}]。quotes 只在 items 这条路上有；content 整段交给系统拆分时不填，因为那些条目是拆出来的，不是我一条条挑的。每条最多 3 句、每句 100 字，超限拒绝不截断；**多数 item 不该有 quotes**——整理长文时尤其容易顺手把原文抄进去，那是在用引语存全文，不是在挑那句不想忘的话。显式字段优先于自动打标，正文逐字入库，合并时也不压缩。人工 why_remembered 与 digest/短内容打标生成的合法理由都会在首次新建时保存；后续合并仅补旧空值，绝不覆盖人工或历史理由。模型漏字段或返回非法理由时仍正常保存正文。同时传 content 时，content 是整批共享的隐藏原文证据，只保存一次；source_ranges 使用 1-based 闭区间把每个桶连回自己的原文片段。"""
+    """把已经明确要求长期保存的长文本整理成多条记忆；不要根据普通聊天自行推断写入意图。传 content 由系统拆分，传 items 表示我已拆成最终条目；显式标题、正文、domain、tags、importance 等优先，正文逐字入库。多数条目不需要 quotes，不要借它保存全文。"""
     return await _with_notice(
         _t_grow.dispatch(content, items=items, test_data=test_data),
         op="grow",
@@ -901,50 +940,9 @@ async def trace(
     quotes_replace: Optional[list] = None,
     reinforce: Optional[bool] = False,
 ) -> str:
-    """仅在明确需要修改某条已存在记忆时调用，不要猜测 bucket_id 或自行改写记忆。
+    """修改一条已知 bucket_id 的现有记忆；只传需要改变的字段，不要猜测 bucket_id 或自行改写记忆。
 
-    resolved=1 标记已放下；resolved=0 重新激活。pinned=1 标记永久核心并锁定
-    importance=10。protected=1 保护记忆不被衰减，但不作为核心准则强制浮现；
-    它与 pinned/anchor 互斥且同样锁定 importance=10。解除最后一层
-    pinned/protected 保护时，必须在同一次调用显式传入 importance=1..10。
-    name 改的是桶名（进文件名、做显示回退）；title 改的是这条记忆自己的标题，
-    **信件的标题就存在 title 里**。两个是不同字段，改一个不会动另一个——
-    想改信件标题请用 title，用 name 改不到它。
-    digested=1 标记已消化并从默认/被动浮现及 dream 隐藏（对 pinned/permanent/anchor 桶不生效——核心准则与坐标系始终在场，要让某条安静请改用 trace(bucket_id, pinned=0)），
-    但仍可通过显式 query、importance 审计或目录找回。content 会完整替换正文；
-    old_str/new_str 会在完整原文中做唯一、逐字的局部替换（new_str 可为空以删除），
-    两种方式都会重建 embedding，且不能同时使用。status/weight 用于 plan；dont_surface 控制日常浮现；
-    why_remembered、meaning_append/replace、media_append/replace 更新相应元数据。
-
-    删除边界：delete=True 只会把 Markdown 移入 archive 并标记 deleted_at，不会
-    物理抹除。hard_delete=True 仅用于清理创建时明确标记 test_data=True 的测试桶，
-    必须单独提供非空 delete_reason；普通记忆和 plan 一律拒绝且不会顺带归档。
-    delete 与 hard_delete 不能同时使用。归档记忆只有在反思后决定值得再次回忆时，才单独调用
-    trace(bucket_id="...", restore=True) 恢复；若历史归档同时带有 protected/anchor，
-    只能用 restore=True、protected=0、importance=1..10 原子解除冲突后恢复。
-    检索命中不会自动恢复。只传需要修改的字段，-1 或空串表示不改。
-
-    关系修正：桶间关系由后端在写入时自动建立，模型不需要也无法主动建立它们；
-    但发现连错了可以在这里改。unlink="目标id" 双向断开这一对的关联；
-    relink="目标id" 配合 relation_type=（caused_by / causes / continuation_of /
-    continues / related_to / same_event）把已存在关系改成正确的类型，对侧自动
-    取反向类型。改过的关系会被标记为手动关系，此后不再被自动推断改写或挤掉。
-    relink 不能凭空建立关系——两条记忆之间没有已存在的关系时会被拒绝。
-    这两个参数与其他字段更新互斥，请单独调用。
-
-    引语订正：quotes_replace 整体替换这条记忆的引语，用来订正和删除写入那一刻
-    留下的原话。传 [] 删掉全部；只想去掉其中一句，就把要保留的那几句原样传回来。
-    格式同 hold(quotes=...)：字符串列表，或 [{"text":"原话","speaker":"谁说的",
-    "at":"什么时候"}]。**只能改和删，不能补录**——这条记忆本来没有引语会被拒绝，
-    条数也只能持平或减少。「当时说出口就知道不想忘」是写入那一刻的判断；事后
-    追认一句话「当时就知道它重要」，那不是引语，是摘要。同样与其他字段更新互斥。
-
-    强化：reinforce=True 刷新这条记忆的活跃时间并累加 activation_count，让它在
-    之后的浮现里排得更靠前。**检索本身不再做这件事**——breath_search 命中一条
-    不代表它要紧，只代表我在找它；为了核对、debug、反复确认而读的记忆，读多了
-    权重就会爬到最高，那不是记忆变重要，是我查得勤。所以强化改成读完之后针对
-    **那一条**显式确认：这条确实要紧。整批候选不要一起强化，命中里绝大多数只是
-    路过。与其他字段更新互斥，请单独调用。
+    常用：domain/tags/importance 分类，resolved=1 放下，pinned=1 置顶，old_str/new_str 局部订正，status/weight 修改计划，reinforce=True 强化。name 是桶名，title 是记忆或信件标题。quotes_replace 只能改删已有引语，不能补录。delete=True 只归档；hard_delete=True 仅用于清理创建时明确标记 test_data=True 的测试桶，且必须给 delete_reason；普通记忆和 plan 一律拒绝且不会顺带归档；delete 与 hard_delete 不能同时使用。content 整体替换、关系修正、引语订正及删除类操作风险较高，应单独调用并依赖工具校验。
     """
     if deletion_request_id or deletion_decision:
         result = await deletion_requests.decide(
@@ -1025,10 +1023,7 @@ except (AttributeError, RuntimeError, TypeError, ValueError) as _trace_schema_ex
 async def dream(
     window_hours: Optional[int] = 48,
 ) -> str:
-    """读取最近 window_hours（默认 48h）内有变动的所有记忆桶,用于回顾与消化。
-    每个桶返回其在窗口内的最新内容（按 last_active 取）,完整正文不截断。
-    可据此操作：放下的 → trace(resolved=1) 沉底；有沉淀的 → hold(feel=True, source_bucket=...) 记录；无沉淀则不操作。
-    候选桶超过 40 时按 decay_engine.calculate_score() 排序取前 40，避免一次返回过多。"""
+    """回顾最近 window_hours（默认 48 小时）发生变化的记忆，供我消化：可以放下、留下感受，也可以什么都不做。返回完整正文，最多 40 条；此工具本身不修改记忆。"""
     return await _with_notice(
         _t_dream.dispatch(
             window_hours=window_hours,
@@ -1193,7 +1188,7 @@ async def feel(
     query: str,
     max_tokens: Optional[int] = 0,
 ) -> str:
-    """按关键词找回我以前留下的感受。query 必填——feel 不是列表，是「我此刻在想的这件事，我以前怎么感受的」，先说在想什么才知道该翻哪一段。关键词走向量检索（候选限定在 feel 桶内，相似度 >= 0.65 才算命中），同一件事换个说法也能找回；向量不可用时退回关键词字面匹配并明确提示降级。命中后逐字返回完整正文，不截断、不摘要、不调 LLM；不返回未命中的 feel，也不用低相关的凑数。写入感受仍用 hold(content=..., feel=True, source_bucket=...)。"""
+    """找回我过去对某件事的感受。用 query 写下此刻在想的人、事件或问题；支持语义检索，命中后逐字返回相关 feel，不用低相关内容凑数。写入新感受用 hold(feel=True)。"""
     return await _with_notice(
         _t_breath.surface_feels(query=query, max_tokens=max_tokens or 10000),
         op="feel",
@@ -1268,6 +1263,42 @@ for _strict_tool_name in (
         )
 
 
+# 高级 Breath 可单独关闭；默认开启以兼容已有客户端。
+breath_advanced_tool_gate = OptionalToolGroupGate(
+    mcp,
+    {"breath_advanced": breath_advanced},
+)
+try:
+    _breath_advanced_enabled = bool(
+        (config.get("features") or {}).get("breath_advanced_enabled", True)
+    )
+    breath_advanced_tool_gate.sync(_breath_advanced_enabled)
+except Exception as _breath_advanced_gate_exc:
+    logger.error(
+        "Breath advanced MCP gate failed closed: %s",
+        type(_breath_advanced_gate_exc).__name__,
+    )
+    breath_advanced_tool_gate.sync(False)
+
+
+# Letter 是可选的叙事扩展。关闭时三个工具从 MCP 清单中真正消失，
+# 客户端不会再下载它们的 schema，也不会为描述支付上下文 token。
+letter_tool_gate = OptionalToolGroupGate(
+    mcp,
+    {
+        "letter_write": letter_write,
+        "letter_lock_update": letter_lock_update,
+        "letter_read": letter_read,
+    },
+)
+try:
+    _letters_enabled = bool((config.get("features") or {}).get("letters_enabled", False))
+    letter_tool_gate.sync(_letters_enabled)
+except Exception as _letter_gate_exc:
+    logger.error("Letter MCP gate failed closed: %s", type(_letter_gate_exc).__name__)
+    letter_tool_gate.sync(False)
+
+
 # You 与 Them 是仅有的两个动态工具：各自按持久开关在唯一连接器 /mcp 上
 # 挂载或摘除。基础工具固定 16 个（含 3.4.0 并回的信件三件套），只开一个是
 # 17，两个都开是 18。
@@ -1307,7 +1338,12 @@ except Exception as _them_gate_exc:
         them_tool_gate.sync(False)
     except Exception:
         pass
-_wsh.init_runtime(you_tool_gate=you_tool_gate, them_tool_gate=them_tool_gate)
+_wsh.init_runtime(
+    you_tool_gate=you_tool_gate,
+    them_tool_gate=them_tool_gate,
+    letter_tool_gate=letter_tool_gate,
+    breath_advanced_tool_gate=breath_advanced_tool_gate,
+)
 migrate_engine.attach_you_runtime(you_service, you_tool_gate)
 migrate_engine.attach_them_runtime(them_service, them_tool_gate)
 

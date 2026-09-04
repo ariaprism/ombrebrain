@@ -144,6 +144,9 @@ def register(mcp) -> None:
                         if letter_locked
                         else meta.get("name", b["id"])
                     ),
+                    # Dashboard display prefers the deliberate title, while
+                    # name remains the stable searchable/storage label.
+                    "title": "" if letter_locked else meta.get("title", ""),
                     "type": meta.get("type", "dynamic"),
                     "domain": (
                         ["letter"] if letter_locked else meta.get("domain", [])

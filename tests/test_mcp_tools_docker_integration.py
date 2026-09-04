@@ -62,7 +62,7 @@ EXPECTED_TOOL_ORDER = (
 )
 
 EXPECTED_TOOL_PROPERTIES = {
-    "breath": set(),
+    "breath": {"reason"},
     "breath_search": {"query", "domain", "max_results", "date_from", "date_to", "quotes"},
     "breath_advanced": {
         "query",
@@ -401,9 +401,9 @@ def test_manifest_exposes_exactly_the_documented_main_tools(mcp_client):
         assert set(schema.get("properties", {})) == expected_properties, name
         assert set(schema.get("required", [])) == EXPECTED_REQUIRED_PROPERTIES.get(name, set()), name
 
-    # The public schema must remain parameter-free so clients auto-load it.
-    # Runtime compatibility with the old 9-argument schema is tested separately.
-    assert tools_by_name["breath"]["inputSchema"].get("properties") == {}
+    # Keep the everyday surface tiny while allowing a conversational reason.
+    # Runtime compatibility with the old advanced schema is tested separately.
+    assert set(tools_by_name["breath"]["inputSchema"].get("properties", {})) == {"reason"}
 
 
 

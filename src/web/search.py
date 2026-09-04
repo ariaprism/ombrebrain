@@ -436,6 +436,7 @@ def register(mcp) -> None:
                     results.append({
                         "id": bid,
                         "name": meta.get("name", bid),
+                        "title": meta.get("title", ""),
                         "domain": meta.get("domain", []),
                         "type": meta.get("type", "dynamic"),
                         "resolved": resolved,
