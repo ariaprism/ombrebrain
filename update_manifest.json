@@ -7,8 +7,8 @@
     },
     {
       "path": "frontend/dashboard.html",
-      "sha256": "8c05dd56c2c2aefdde031eafb8962d8586d199f7a7f0a81a4e6cdc19b163ad8b",
-      "size": 571464
+      "sha256": "d418d35d2a0b87c8a4509799c71f1fc4fe9f7abe76ba024a11142c20f1805bc1",
+      "size": 611812
     },
     {
       "path": "frontend/favicon.svg",
@@ -827,8 +827,8 @@
     },
     {
       "path": "src/server.py",
-      "sha256": "4851927b317fefc569d237a633378b010d1f402097eaf5427ee18a4b9c71cd44",
-      "size": 75166
+      "sha256": "880d9ccdc502eba86f3444aef3d57f662c6ed5ecdc76024bfa3b28ae133fa09b",
+      "size": 69170
     },
     {
       "path": "src/server_app.py",
@@ -1047,13 +1047,13 @@
     },
     {
       "path": "src/web/__init__.py",
-      "sha256": "c126de861ff87df881e75ea6d429e334ce2ba35b18139de29f699d6017b5fe49",
-      "size": 2406
+      "sha256": "7d8afdf3a21c13bc8531ffac7de140ca43a9c38f31184062011b7993edf3813b",
+      "size": 2494
     },
     {
       "path": "src/web/_shared.py",
-      "sha256": "fa699d0e6aa78e94a29ffe5fe267fac7da3dc353b043cc3a721b15344eb29b22",
-      "size": 42682
+      "sha256": "4d4fd390bf05beff90b47eb45c79919db522daa3d8c1295535cb44b2c7ece93b",
+      "size": 42739
     },
     {
       "path": "src/web/auth.py",
@@ -1062,8 +1062,8 @@
     },
     {
       "path": "src/web/buckets.py",
-      "sha256": "dc274b205d6e47d51eb4e13747c811d67b4f97f12ad9e2a6e853944afabc34d0",
-      "size": 50062
+      "sha256": "cf81a7f0bd8694b646f49cff1af71f251159098a25149adb132d181278b854b2",
+      "size": 50287
     },
     {
       "path": "src/web/config_api.py",
@@ -1079,6 +1079,11 @@
       "path": "src/web/embedding.py",
       "sha256": "ce0f4eabe0ccbc6c61bf5a10d978874556279f0047894558db8459e8640f1c49",
       "size": 38112
+    },
+    {
+      "path": "src/web/feature_settings.py",
+      "sha256": "ed0e457ad3b4c407556a10ef44cf44a16cab64563b1e2a0451518b3c90475363",
+      "size": 5402
     },
     {
       "path": "src/web/github.py",
@@ -1132,8 +1137,8 @@
     },
     {
       "path": "src/web/search.py",
-      "sha256": "7b11506878ce8a7a39048d95a5d8d55592e6569661677703c1ce151d2fb22513",
-      "size": 20996
+      "sha256": "65c80ca827edb98d43fea288890f8e28a5352b66ad9268e189f3352a8374871b",
+      "size": 21052
     },
     {
       "path": "src/web/system.py",
