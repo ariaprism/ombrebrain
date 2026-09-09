@@ -9,8 +9,8 @@ def _dashboard_html():
 
 
 def test_dashboard_version_check_uses_github_api_before_raw_cdn_fallback():
-    api_url = "https://api.github.com/repos/P0luz/Ombre-Brain/contents/VERSION?ref=main"
-    raw_url = "https://raw.githubusercontent.com/P0luz/Ombre-Brain/main/VERSION?t="
+    api_url = "https://api.github.com/repos/ariaprism/ombrebrain/contents/VERSION?ref=main"
+    raw_url = "https://raw.githubusercontent.com/ariaprism/ombrebrain/main/VERSION?t="
 
     for rel_path in ("frontend/dashboard.html",):
         html = (ROOT / rel_path).read_text(encoding="utf-8")
@@ -111,6 +111,8 @@ def test_dashboard_local_preview_hides_embedding_noise_and_uses_room_language():
     assert "!isLocalDashboard() && !d.embedding_enabled" in html
     assert "total + ' 记忆 · ' + pinned + ' 珍藏" in html
     assert "decaying ? '记忆在呼吸' : '呼吸暂停'" in html
-    assert '#sec-version { display: none !important; }' in html
+    assert '#sec-version { display: none !important; }' not in html
+    assert 'class="bucket-bulkbar"' not in html
+    assert 'class="bucket-select"' not in html
     assert html.index('<div id="status-banner"') > html.index('id="settings-view"')
     assert 'border-style: dashed !important;' in html

@@ -57,6 +57,7 @@ from ombrebrain.security.deployment_profile import enforce_mcp_network_guard
 from import_memory import ImportEngine
 from migrate_engine import MigrateEngine
 from utils import get_version, load_config, setup_logging
+from recall_export import export_recall_cards, export_recall_manifest
 
 
 class OptionalToolGroupGate:
@@ -1268,6 +1269,28 @@ breath_advanced_tool_gate = OptionalToolGroupGate(
     mcp,
     {"breath_advanced": breath_advanced},
 )
+
+
+@mcp.resource(
+    "ombre://recall/cards/{cursor}",
+    name="Bubble recall cards",
+    description="供受信任客户端同步轻量召回卡的只读分页资源；不返回完整记忆正文。",
+    mime_type="application/json",
+)
+async def recall_cards_resource(cursor: str) -> str:
+    return await export_recall_cards(bucket_mgr, cursor=cursor)
+
+
+@mcp.resource(
+    "ombre://recall/manifest",
+    name="Bubble recall manifest",
+    description="供受信任客户端低成本检查召回卡快照是否变化；只返回指纹与数量。",
+    mime_type="application/json",
+)
+async def recall_manifest_resource() -> str:
+    return await export_recall_manifest(bucket_mgr)
+
+
 try:
     _breath_advanced_enabled = bool(
         (config.get("features") or {}).get("breath_advanced_enabled", True)

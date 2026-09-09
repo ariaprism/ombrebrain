@@ -1,7 +1,7 @@
 """热更新来源白名单 + 自动 pip 安装闸门（安全加固 #2）。
 
 do-update 会把远端 zip 覆盖到 src/ 并（旧行为）自动 pip install，等于把「谁能改
-config.update」放大成 RCE。默认只信官方仓、自动 pip 默认关闭。
+config.update」放大成 RCE。这个分支默认只信自己的仓库、自动 pip 默认关闭。
 """
 import hashlib
 import re
@@ -22,17 +22,17 @@ def _restore():
     sh.config = old
 
 
-def test_official_repo_allowed(monkeypatch):
+def test_project_repo_allowed(monkeypatch):
     monkeypatch.delenv("OMBRE_ALLOW_CUSTOM_UPDATE_REPO", raising=False)
-    assert meta._update_repo_allowed("P0luz/Ombre-Brain")
-    assert meta._update_repo_allowed("p0luz/ombre-brain")   # 大小写不敏感
-    assert meta._update_repo_allowed("/P0luz/Ombre-Brain/")  # 容忍多余斜杠
+    assert meta._update_repo_allowed("ariaprism/ombrebrain")
+    assert meta._update_repo_allowed("ARIAPRISM/OMBREBRAIN")   # 大小写不敏感
+    assert meta._update_repo_allowed("/ariaprism/ombrebrain/")  # 容忍多余斜杠
 
 
 def test_foreign_repo_rejected_by_default(monkeypatch):
     monkeypatch.delenv("OMBRE_ALLOW_CUSTOM_UPDATE_REPO", raising=False)
     assert not meta._update_repo_allowed("attacker/evil")
-    assert not meta._update_repo_allowed("p0luz/ombre-brain-evil")
+    assert not meta._update_repo_allowed("ariaprism/ombrebrain-evil")
 
 
 def test_foreign_repo_allowed_via_optin(monkeypatch):

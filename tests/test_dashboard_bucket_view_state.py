@@ -104,20 +104,11 @@ def test_empty_bucket_view_resets_page_and_selection_state():
     assert "syncBucketSelectionUi();" in empty_branch
 
 
-def test_select_all_control_is_scoped_to_the_current_page():
+def test_dashboard_hides_unused_bulk_selection_controls():
     html = DASHBOARD.read_text(encoding="utf-8")
-    source = _dashboard_section(
-        "function _currentBucketPageItems(", "async function runBucketBatch("
-    )
-
-    assert "全选当前页" in html
-    assert "selectAllCurrentPage(this.checked)" in html
-    assert "selectAllFiltered" not in html
-    assert "return visible.slice(startIdx, startIdx + BUCKETS_PER_PAGE);" in source
-    assert "return _currentBucketPageItems().map(function(b)" in source
-    assert "var pageIds = _currentBucketPageIds();" in source
-    assert "function selectAllCurrentPage(checked)" in source
-    assert "_currentBucketPageIds().forEach(function(id)" in source
+    assert "全选当前页" not in html
+    assert 'class="bucket-bulkbar"' not in html
+    assert 'class="bucket-select"' not in html
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="Node.js is unavailable")

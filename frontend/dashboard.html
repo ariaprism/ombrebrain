@@ -2411,8 +2411,6 @@
     border-style: dashed !important;
   }
 
-  /* 二改分支不再提供会覆盖本地源码的官方热更新入口。 */
-  #sec-version { display: none !important; }
   #settings-view #status-banner {
     position: static;
     top: auto;
@@ -2860,16 +2858,6 @@
   </div>
   <div class="bucket-list" id="bucket-list">
     <div class="loading">加载中… / Loading…</div>
-  </div>
-  <div class="bucket-bulkbar">
-    <label style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--text-dim);height:32px;"><input id="bucket-select-all" type="checkbox" onchange="selectAllCurrentPage(this.checked)" style="accent-color:var(--accent);cursor:pointer;"> 全选当前页</label>
-    <span id="bucket-selected-count" style="color:var(--text-dim);font-size:12px;">已选 0</span>
-    <div class="bucket-bulkbar-actions">
-      <button onclick="runBucketBatch('forget')" style="height:32px;padding:0 12px;font-size:12px;display:inline-flex;align-items:center;gap:5px;"><i data-lucide="eye-off"></i> 主动遗忘</button>
-      <button onclick="runBucketBatch('resolve')" style="height:32px;padding:0 12px;font-size:12px;display:inline-flex;align-items:center;gap:5px;"><i data-lucide="moon"></i> 沉底</button>
-      <button onclick="runBucketBatch('archive')" style="height:32px;padding:0 12px;font-size:12px;display:inline-flex;align-items:center;gap:5px;"><i data-lucide="archive"></i> 归档</button>
-      <button class="developer-only" onclick="hardDeleteSelectedTests()" style="height:32px;padding:0 12px;font-size:12px;align-items:center;gap:5px;color:#b85c3c;"><i data-lucide="trash-2"></i> 永久删除测试桶</button>
-    </div>
   </div>
   <!-- iter 1.9 C: 已主动遗忘的桶折叠区 / collapsible voluntary-forgotten group -->
   <details id="forgotten-group" style="margin-top:18px;display:none;">
@@ -6560,7 +6548,6 @@ function _paintBuckets() {
     var emotionHtml = '<span class="emotion" style="display:inline-flex;align-items:center;gap:3px;"><span class="v-bar"><span class="v-dot" style="left:' + vPos + '%"></span></span>' + modelV + '</span>';
     return '<div class="' + rowCls + '" data-id="' + escAttr(b.id) + '" ' + rowClick + ' style="cursor:pointer;' + inlineStyle + '">' +
       '<div class="bucket-row-top">' +
-        '<input class="bucket-select" type="checkbox" data-id="' + escAttr(b.id) + '" onclick="event.stopPropagation()" onchange="toggleBucketSelection(this.dataset.id,this.checked)"' + (selectedBucketIds.has(b.id) ? ' checked' : '') + '>' +
         '<span class="' + iconCls + '">' + iconHtml + '</span>' +
         '<span class="name" title="' + escAttr(displayName) + '">' + esc(displayName) + firstBadge + importedBadge + '</span>' +
         '<div class="bucket-row-tags">' +
@@ -9623,7 +9610,7 @@ loadVersionBadge();
       let latestText = '';
       try {
         const rApi = await fetch(
-          'https://api.github.com/repos/P0luz/Ombre-Brain/contents/VERSION?ref=main',
+          'https://api.github.com/repos/ariaprism/ombrebrain/contents/VERSION?ref=main',
           { cache: 'no-store', headers: { 'Accept': 'application/vnd.github.raw' } }
         );
         if (rApi.ok) latestText = await rApi.text();
@@ -9631,7 +9618,7 @@ loadVersionBadge();
 
       if (!latestText.trim()) {
         const rRaw = await fetch(
-          'https://raw.githubusercontent.com/P0luz/Ombre-Brain/main/VERSION?t=' + Date.now(),
+          'https://raw.githubusercontent.com/ariaprism/ombrebrain/main/VERSION?t=' + Date.now(),
           { cache: 'no-store' }
         );
         if (!rRaw.ok) throw new Error('无法读取 GitHub VERSION 文件（' + rRaw.status + '）');
@@ -9644,7 +9631,7 @@ loadVersionBadge();
       // 尝试读 Release 说明（无 Release 时静默忽略）
       var ghRelease = {};
       try {
-        const rRel = await fetch('https://api.github.com/repos/P0luz/Ombre-Brain/releases/latest',
+        const rRel = await fetch('https://api.github.com/repos/ariaprism/ombrebrain/releases/latest',
           { headers: { 'Accept': 'application/vnd.github.v3+json' } });
         if (rRel.ok) ghRelease = await rRel.json();
       } catch(_) {}

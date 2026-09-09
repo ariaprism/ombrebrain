@@ -94,7 +94,7 @@ _AUTHOR_NOTE = {
 # --- 热更新来源与依赖安装的安全闸门（安全加固 #2）---
 # do-update 会把远端 zip 覆盖到 src/ 并 pip install，等于把「谁能改 config.update」
 # 直接放大成 RCE。默认只信官方仓；fork/自建源需显式 env 放行。自动 pip 默认关闭。
-_TRUSTED_UPDATE_REPOS = ("p0luz/ombre-brain",)
+_TRUSTED_UPDATE_REPOS = ("ariaprism/ombrebrain",)
 _MAX_UPDATE_ARCHIVE_BYTES = 64 * 1024 * 1024
 _MAX_UPDATE_MEMBERS = 5_000
 _MAX_UPDATE_MEMBER_BYTES = 16 * 1024 * 1024
@@ -1104,7 +1104,7 @@ def register(mcp) -> None:
                 # #4a ③：更新源可配（update.repo / update.ref），默认官方 main。
                 _ucfg = getattr(sh, "config", {}) or {}
                 _ucfg = _ucfg.get("update") or {}
-                _repo = str(_ucfg.get("repo") or "P0luz/Ombre-Brain").strip().strip("/")
+                _repo = str(_ucfg.get("repo") or "ariaprism/ombrebrain").strip().strip("/")
                 _ref  = str(_ucfg.get("ref")  or "main").strip()
                 # 安全闸门 #2：非官方更新源必须显式放行，否则拒绝——防止「改 config.update.repo
                 # 指向恶意仓 → 覆盖 src → 重启执行」这条 RCE 链在默认配置下成立。
