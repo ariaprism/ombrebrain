@@ -6143,17 +6143,13 @@ async function runBucketBatch(action) {
   if (!ids.length) return alert('请先选择记忆桶。');
   var labels = {forget:'主动遗忘', resolve:'沉底', archive:'归档'};
   if (!confirm('确认对 ' + ids.length + ' 条记忆执行“' + labels[action] + '”？')) return;
-  var reason = '';
-  var allKnownTests = ids.every(isKnownErasableTestBucket);
-  if (action === 'archive' && !allKnownTests) {
-    reason = prompt('Why should these memories be archived? A reason is required.');
-    if (reason === null) return;
-    if (!reason.trim()) return alert('Archive reason is required.');
-  }
-  var res = await authFetch('/api/buckets/batch', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ids:ids, action:action, reason:reason})});
+  var res = await authFetch('/api/buckets/batch', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ids:ids, action:action})});
   if (!res) return;
   var data = await readJsonSafe(res);
-  if (!res.ok) return alert(data.error || '批量操作失败');
+  if (!res.ok || data.ok === false) {
+    await loadBuckets();
+    return alert(data.error || '部分记忆操作失败，请刷新后重试。');
+  }
   if (action === 'forget' && window.ObPet) ObPet.react('forget');
   selectedBucketIds.clear();
   closeDetail();
@@ -6847,15 +6843,9 @@ async function bucketResolve(id) {
 }
 
 async function bucketArchive(id) {
-  if (!confirm('确认申请归档此桶？需填写理由并由 AI 审批；批准后它将从浮现/搜索中隐藏，文件仍保留在 archive/ 目录并标记为已删除。\n\nRequest archive? AI approval is required. The file remains in archive/ with a deletion marker.')) return;
-  var reason = '';
-  if (!isKnownErasableTestBucket(id)) {
-    reason = prompt('为什么要归档这条记忆？必须填写理由，由 AI 审批。 / Why should this memory be archived? AI approval is required.');
-    if (reason === null) return;
-    if (!reason.trim()) { alert('Archive reason is required.'); return; }
-  }
+  if (!confirm('确认归档这条记忆？它将立即从浮现和搜索中隐藏，文件仍保留在 archive/ 目录中。\n\nArchive this memory now? The file remains in archive/.')) return;
   try {
-    var res = await fetch(BASE + '/api/bucket/' + encodeURIComponent(id) + '/archive', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({reason: reason}) });
+    var res = await fetch(BASE + '/api/bucket/' + encodeURIComponent(id) + '/archive', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({}) });
     if (!res.ok) throw new Error(await res.text());
     closeDetail();
     loadBuckets();
@@ -10153,15 +10143,10 @@ async function detectPatterns() {
 
 async function reviewAction(bid, action) {
   try {
-    var reason = '';
-    if (action === 'delete') {
-      reason = prompt('为什么要删除这条记忆？必须填写理由。 / Why should this memory be deleted?');
-      if (reason === null) return;
-      if (!reason.trim()) throw new Error('Deletion reason is required.');
-    }
+    if (action === 'delete' && !confirm('确认删除这条记忆并移入档案？ / Move this memory to archive?')) return;
     const response = await fetch(BASE + '/api/import/review', {
       method: 'POST', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ decisions: [{ bucket_id: bid, action, reason }] })
+      body: JSON.stringify({ decisions: [{ bucket_id: bid, action }] })
     });
     const result = await readJsonSafe(response);
     if (!response.ok || !result || result.applied !== 1 || result.errors) {
@@ -10178,6 +10163,7 @@ async function batchReview(idsJson, action) {
   try {
     const ids = JSON.parse(idsJson);
     if (!Array.isArray(ids) || !ids.length) throw new Error('没有可审阅的记忆');
+    if (action === 'delete' && !confirm('确认删除这些记忆并移入档案？ / Move these memories to archive?')) return;
     const response = await fetch(BASE + '/api/import/review', {
       method: 'POST', headers: {'Content-Type':'application/json'},
       body: JSON.stringify({ decisions: ids.map(id => ({ bucket_id: id, action })) })
@@ -11322,13 +11308,11 @@ async function manageLetterLock(id) {
 }
 
 async function deleteLetter(id) {
-  const reason = prompt('为什么要删除这封信？必须填写理由。 / Why should this letter be deleted?');
-  if (reason === null) return;
-  if (!reason.trim()) { alert('必须填写删除理由。 / Deletion reason is required.'); return; }
+  if (!confirm('确认删除这封信并移入档案？ / Move this letter to archive?')) return;
   try {
-    const r = await fetch(BASE + '/api/letter/' + encodeURIComponent(id) + '?confirm=true', { method: 'DELETE', headers: {'Content-Type':'application/json'}, body: JSON.stringify({reason}) });
+    const r = await fetch(BASE + '/api/letter/' + encodeURIComponent(id) + '?confirm=true', { method: 'DELETE', headers: {'Content-Type':'application/json'}, body: JSON.stringify({}) });
     const d = await r.json();
-    if (d.ok) { alert(d.deleted ? '已移入档案 / Moved to archive' : '删除申请已提交 / Deletion request submitted'); loadLetters(); }
+    if (d.ok) { alert('已移入档案 / Moved to archive'); loadLetters(); }
     else { alert(d.error || '删除失败'); }
   } catch (e) { alert(e.message); }
 }

@@ -442,15 +442,11 @@ def register(mcp) -> None:
         if bucket and not is_letter_bucket(bucket):
             return JSONResponse({"error": "letter not found"}, status_code=404)
         try:
-            try:
-                body = await sh._read_json_object(request)
-            except Exception:
-                body = {}
-            result = await sh.deletion_requests.submit(
-                letter_id, body.get("reason", ""), is_letter=True
+            result = await sh.deletion_requests.execute_confirmed(
+                letter_id, is_letter=True
             )
             if not result.get("ok"):
-                status = 404 if result.get("code") == "not_found" else 409 if result.get("code") in {"pending_exists", "daily_limit", "lifetime_limit"} else 400
+                status = 404 if result.get("code") == "not_found" else 500
                 return JSONResponse(result, status_code=status)
             return JSONResponse(result)
         except Exception as e:

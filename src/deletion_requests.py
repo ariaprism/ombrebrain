@@ -126,6 +126,53 @@ class DeletionRequestStore:
         meta = bucket.get("metadata") or {}
         return not meta.get("deleted_at") and str(meta.get("type") or "").lower() != "archived"
 
+    async def execute_confirmed(
+        self, bucket_id: str, *, action: str = "delete", is_letter: bool = False
+    ) -> dict:
+        """Execute an authenticated human choice without an AI approval request.
+
+        Keep the existing soft deletion and letter index cleanup behavior.
+        Historical pending requests are superseded only after successful execution.
+        """
+        if action not in {"archive", "delete"}:
+            return {"ok": False, "error": "invalid action", "code": "invalid_action"}
+        async with _filesystem_turn(self.base_dir, "human-deletion-requests"):
+            bucket = await self.bucket_mgr.get(bucket_id)
+            if not bucket and not is_letter:
+                return {"ok": False, "error": "bucket not found", "code": "not_found"}
+            result = await self.human_delete.execute(
+                bucket_id, action=action,
+                is_letter=is_letter or bool(bucket and is_letter_bucket(bucket)),
+            )
+            if not result.get("ok"):
+                return result
+            state = self._load()
+            changed = False
+            for record in state["requests"]:
+                if record.get("bucket_id") == bucket_id and record.get("status") == "pending":
+                    record["status"] = "superseded"
+                    record["decided_at"] = datetime.now().astimezone().isoformat()
+                    record["superseded_reason"] = "human confirmed deletion"
+                    changed = True
+            if changed:
+                self._save(state)
+            return result
+
+    async def execute_confirmed_batch(self, bucket_ids: list[str], *, action: str = "delete") -> dict:
+        updated, missing, errors = [], [], []
+        for bucket_id in dict.fromkeys(bucket_ids):
+            try:
+                result = await self.execute_confirmed(bucket_id, action=action)
+                if result.get("ok"):
+                    updated.append(bucket_id)
+                elif result.get("code") == "not_found":
+                    missing.append(bucket_id)
+                else:
+                    errors.append({"id": bucket_id, "error": result.get("error", "archive failed")})
+            except Exception as exc:
+                errors.append({"id": bucket_id, "error": str(exc)})
+        return {"ok": not missing and not errors, "updated": updated, "missing": missing, "errors": errors}
+
     async def submit(
         self,
         bucket_id: str,

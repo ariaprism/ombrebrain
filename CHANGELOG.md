@@ -2,6 +2,10 @@
 
 本项目版本号见根目录 `VERSION` 文件，Docker 镜像 tag 与之对应（`p0luz/ombre-brain:<VERSION>`）。
 
+## Unreleased
+
+- Dashboard 归档与删除改为一次确认后立即执行，移除理由填写与 AI 审批；覆盖单条、批量、审阅与信件入口。保留软归档文件、删除标记和索引清理。
+
 ## 3.6.3
 
 ### 修复 / Fixed
