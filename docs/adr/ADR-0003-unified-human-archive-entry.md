@@ -1,5 +1,9 @@
 # ADR-0003: 统一人类归档入口
 
+## Status
+
+Superseded for human approval behavior by ADR-0004. The following records the historical design.
+
 ## Decision
 
 Dashboard 对普通记忆桶只展示一个「归档」按钮。人类点击后必须填写理由，提交既有

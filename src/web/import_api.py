@@ -906,8 +906,8 @@ def register(mcp) -> None:
                     if not bucket or is_letter_bucket(bucket):
                         errors += 1
                         continue
-                    result = await sh.deletion_requests.submit(
-                        bid, str(d.get("reason") or "")
+                    result = await sh.deletion_requests.execute_confirmed(
+                        bid
                     )
                     if not result.get("ok"):
                         errors += 1

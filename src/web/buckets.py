@@ -478,30 +478,19 @@ def register(mcp) -> None:
 
     @mcp.custom_route("/api/bucket/{bucket_id}/archive", methods=["POST"])
     async def api_bucket_archive(request: Request) -> Response:
-        """Submit the single human archive request for a formal bucket.
-
-        Human-facing archive intentionally uses the delete-to-archive terminal
-        action: after AI approval the Markdown is retained in ``archive/`` and
-        receives ``deleted_at``. The lower-level ``bucket_mgr.archive()`` path
-        remains available to AI/system lifecycle code and keeps its distinct
-        non-tombstone semantics.
-        """
+        """Move a human-selected bucket to archive with a deletion marker."""
         from starlette.responses import JSONResponse
         err = sh._require_auth(request)
         if err:
             return err
         bucket_id = request.path_params["bucket_id"]
         try:
-            try:
-                body = await sh._read_json_object(request)
-            except Exception:
-                body = {}
-            result = await sh.deletion_requests.submit(
-                bucket_id, body.get("reason", ""), action="delete"
+            result = await sh.deletion_requests.execute_confirmed(
+                bucket_id, action="delete"
             )
             if result.get("ok"):
                 return JSONResponse(result)
-            status = 404 if result.get("code") == "not_found" else 409 if result.get("code") in {"pending_exists", "daily_limit", "lifetime_limit"} else 400
+            status = 404 if result.get("code") == "not_found" else 500
             return JSONResponse(result, status_code=status)
         except Exception as e:
             return JSONResponse({"error": str(e)}, status_code=500)
@@ -610,11 +599,10 @@ def register(mcp) -> None:
         if action not in {"forget", "resolve", "archive"}:
             return JSONResponse({"error": "unsupported batch action"}, status_code=400)
         if action == "archive":
-            result = await sh.deletion_requests.submit_batch(
-                list(dict.fromkeys(ids)), body.get("reason", ""), action="delete"
+            result = await sh.deletion_requests.execute_confirmed_batch(
+                list(dict.fromkeys(ids)), action="delete"
             )
-            status = 400 if result.get("code") == "reason_required" else 200
-            return JSONResponse({"action": action, **result}, status_code=status)
+            return JSONResponse({"action": action, **result})
         updated, missing, errors = [], [], []
         for bucket_id in dict.fromkeys(ids):
             try:
@@ -979,7 +967,7 @@ def register(mcp) -> None:
 
     @mcp.custom_route("/api/bucket/{bucket_id}", methods=["DELETE"])
     async def api_bucket_delete(request: Request) -> Response:
-        """Submit a human deletion request for a formal bucket."""
+        """Execute a confirmed human soft deletion immediately."""
         from starlette.responses import JSONResponse
         err = sh._require_auth(request)
         if err:
@@ -988,14 +976,10 @@ def register(mcp) -> None:
             return JSONResponse({"error": "confirm=true required for delete-to-archive"}, status_code=400)
         bucket_id = request.path_params["bucket_id"]
         try:
-            try:
-                body = await sh._read_json_object(request)
-            except Exception:
-                body = {}
-            result = await sh.deletion_requests.submit(bucket_id, body.get("reason", ""))
+            result = await sh.deletion_requests.execute_confirmed(bucket_id)
             if result.get("ok"):
                 return JSONResponse(result)
-            status = 404 if result.get("code") == "not_found" else 409 if result.get("code") in {"pending_exists", "daily_limit", "lifetime_limit"} else 400
+            status = 404 if result.get("code") == "not_found" else 500
             return JSONResponse(result, status_code=status)
         except Exception as e:
             return JSONResponse({"error": str(e)}, status_code=500)
